@@ -1,10 +1,13 @@
 import dearpygui.dearpygui as dpg
 import crafty_client, scheduler
 import toml
+import urllib3
+
+urllib3.disable_warnings()
 
 conf = toml.load("server.toml")
 server_url = conf["server"]["url"]
-server_token = conf["server"][token]
+server_token = conf["server"]["token"]
 crafty = crafty_client.Crafty4(server_url, server_token)
 
 dpg.create_context()
@@ -13,15 +16,14 @@ dpg.setup_dearpygui()
 
 
 class Server:
-    def __init__(self, crafty, server_uuid, dpg):
+    def __init__(self, crafty, server_uuid):
         try:
-            self.dpg = dpg
             self.stats = crafty.get_server_stats(server_uuid)
             self.logs = crafty.get_server_logs(server_uuid)
             self.crafty = crafty
         except:
             print("failed to get server stats,Retrying")
-            self.__init__(crafty, server_uuid, dpg)
+            self.__init__(crafty, server_uuid)
         # Parse server data
         self.parsed = {
             "id": self.stats["server_id"]["server_id"],
@@ -31,6 +33,10 @@ class Server:
             "crashed": self.stats["crashed"],
             "size": self.stats["world_size"],
         }
+        self.button_pos = dpg.get_item_pos(self.parsed["id"] + "button_group")
+        self.buttons_group = dpg.group(
+            horizontal=True, tag=self.parsed["id"] + "button_group"
+        )
 
     def start(self):
         self.crafty.start_server(self.parsed["id"])
@@ -42,19 +48,17 @@ class Server:
         crafty.run_command(self.parsed["id"], app_data)
 
     def setup_window(self):
-        # dpg = self.dpg
         self.window = dpg.window(
             label=self.parsed["name"],
             tag=self.parsed["id"],
             no_move=True,
             no_resize=True,
         )
+        
         with self.window:
             dpg.add_text(
                 default_value="UUID: ", label=self.parsed["id"], show_label=True
             )
-            dpg.add_button(label="start", callback=self.start)
-            dpg.add_button(label="stop", callback=self.stop)
             self.run_indicator = dpg.add_text(
                 default_value="Running: ", label=self.parsed["running"], show_label=True
             )
@@ -65,9 +69,11 @@ class Server:
                 label="command", width=-1, callback=self.command_callback, on_enter=True
             )
             self.window_pos = dpg.get_item_pos(self.parsed["id"])
+            with self.buttons_group:
+                dpg.add_button(label="start", callback=self.start)
+                dpg.add_button(label="stop", callback=self.stop)
 
     def resize_callback(self):
-        dpg = self.dpg
         self.viewport_width = dpg.get_viewport_client_width()
         self.viewport_height = dpg.get_viewport_client_height()
         dpg.configure_item(
@@ -77,6 +83,13 @@ class Server:
             pos=(
                 round(self.window_pos[0] + self.viewport_width / 4),
                 self.window_pos[1],
+            ),
+        )
+        dpg.configure_item(
+            self.parsed["id"] + "button_group",
+            pos=(
+                round(self.button_pos[0] + self.viewport_width / 2),
+                self.button_pos[1],
             ),
         )
 
@@ -94,22 +107,19 @@ class Server:
             "crashed": self.stats["crashed"],
             "size": self.stats["world_size"],
         }
-        dpg = self.dpg
         dpg.configure_item(self.logs_term, items=self.logs)
         dpg.set_item_label(self.run_indicator, self.parsed["running"])
         self.resize_callback()
 
 
 class Main_Window:
-    def __init__(self, crafty, dpg):
+    def __init__(self, crafty):
         self.crafty = crafty
-        self.dpg = dpg
         self.server_list = crafty.list_mc_servers()
         self.selected_server = self.server_list[1]["server_id"]
 
     def button_callback(self, sender, app_data, user_data):
-        dpg = self.dpg
-        print(user_data)
+        print("change" + user_data)
         self.selected_server = user_data
         dpg.configure_item(user_data, show=True)
         self.resize_callback()
@@ -120,7 +130,6 @@ class Main_Window:
                 dpg.configure_item(server["server_id"], show=False)
 
     def setup_window(self):
-        # dpg=self.dpg
         self.window = dpg.window(
             label="Crafty-UI", tag="main", no_move=True, no_resize=True
         )
@@ -129,12 +138,13 @@ class Main_Window:
         self.viewport_height = dpg.get_viewport_client_height()
         for server in self.server_list:
             self.server_window[server["server_id"]] = Server(
-                self.crafty, server["server_id"], self.dpg
+                self.crafty, server["server_id"]
             )
             self.server_window[server["server_id"]].setup_window()
         self.window_pos = (0, 0)  # dpg.get_item_pos("main")
         with self.window:
             for server in self.server_list:
+                print("id:" + server["server_id"])
                 dpg.add_button(
                     label=server["server_name"],
                     user_data=server["server_id"],
@@ -142,7 +152,7 @@ class Main_Window:
                 )
 
     def update_server_data(self):
-        dpg = self.dpg
+        print("updated: " + self.selected_server)
         self.viewport_width = dpg.get_viewport_client_width()
         self.viewport_height = dpg.get_viewport_client_height()
         self.resize_callback()
@@ -158,7 +168,7 @@ class Main_Window:
         self.server_window[self.selected_server].resize_callback()
 
 
-win = Main_Window(crafty, dpg)
+win = Main_Window(crafty)
 win.setup_window()
 dpg.set_viewport_resize_callback(win.resize_callback)
 update_timer = scheduler.RepeatedTimer(1, win.update_server_data)
