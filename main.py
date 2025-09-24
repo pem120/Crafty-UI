@@ -1,18 +1,47 @@
+from multiprocessing import set_forkserver_preload
+from tkinter import Label
 import dearpygui.dearpygui as dpg
-import crafty_client, scheduler
+import crafty_client
 import toml
 import urllib3
+import scheduler
+import colorlog
+
 
 urllib3.disable_warnings()
-
-conf = toml.load("server.toml")
-server_url = conf["server"]["url"]
-server_token = conf["server"]["token"]
-crafty = crafty_client.Crafty4(server_url, server_token)
+try:
+    conf = toml.load("server.toml")
+    server_url = conf["server"]["url"]
+    server_token = conf["server"]["token"]
+    crafty = crafty_client.Crafty4(server_url, server_token)
+except Exception as e:
+    print(f"Failled to parse server.toml.{e}")
 
 dpg.create_context()
 dpg.create_viewport(title="Crafty UI")
 dpg.setup_dearpygui()
+handler = colorlog.StreamHandler()
+formatter = colorlog.ColoredFormatter(
+    "%(log_color)s%(levelname)-8s%(reset)s %(blue)s%(message)s",
+    datefmt=None,
+    reset=True,
+    log_colors={
+        "DEBUG": "cyan",
+        "INFO": "green",
+        "WARNING": "yellow",
+        "ERROR": "red",
+        "CRITICAL": "red,bg_white",
+    },
+    secondary_log_colors={},
+    style="%",
+)
+handler.setFormatter(formatter)
+
+logger = colorlog.getLogger("Main")
+logger.addHandler(handler)
+urllib_logger = colorlog.getLogger("urllib3")
+urllib_logger.setLevel(colorlog.WARNING)
+urllib_logger.addHandler(handler)
 
 
 class Server:
@@ -21,8 +50,10 @@ class Server:
             self.stats = crafty.get_server_stats(server_uuid)
             self.logs = crafty.get_server_logs(server_uuid)
             self.crafty = crafty
-        except:
-            print("failed to get server stats,Retrying")
+            self.log_length = []
+
+        except Exception as e:
+            print("failed to get server stats,Retrying \n" + str(e))
             self.__init__(crafty, server_uuid)
         # Parse server data
         self.parsed = {
@@ -35,38 +66,50 @@ class Server:
             "mem": self.stats["mem"],
             "cpu": self.stats["cpu"],
         }
+        self.logger = colorlog.getLogger(self.parsed["name"])
+        self.logger.addHandler(handler)
+        self.logger.setLevel(colorlog.DEBUG)
 
     def start(self):
-        self.crafty.start_server(self.parsed["id"])
+        try:
+            crafty.start_server(self.parsed["id"])
+        except Exception as e:
+            self.logger.error(f"Failled to start the server", exc_info=True)
 
     def stop(self):
-        self.crafty.stop_server(self.parsed["id"])
+        try:
+            crafty.stop_server(self.parsed["id"])
+        except Exception as e:
+            self.logger.exception("Failled to stop server")
 
     def command_callback(self, sender, app_data, user_data):
-        crafty.run_command(self.parsed["id"], app_data)
+        try:
+            crafty.run_command(self.parsed["id"], app_data)
+        except Exception as e:
+            self.logger.exception("Failled to execute command")
 
     def setup_window(self):
+
         self.window = dpg.window(
             label=self.parsed["name"],
             tag=self.parsed["id"],
             no_move=True,
             no_resize=True,
-            show=False,
+            show=True,
         )
-        self.button_group = dpg.group(horizontal=True, tag=f"group_{self.parsed['id']}")
-        self.plot_group = dpg.group(horizontal=True, tag=f"plot_{self.parsed['id']}")
 
         self.cpu_plot_x = [0]
         self.cpu_plot_y = [0]
         self.ram_plot_x = [0]
         self.ram_plot_y = [0]
+
         with self.window:
             self.tabs = dpg.tab_bar()
             with self.tabs:
-                #self.log_tab = dpg.tab(label="Terminal")
-                #self.plots_tab = dpg.tab(label="Graphs")
                 with dpg.tab(label="Terminal"):
-                    dpg.add_text(
+                    # Create UI elements first
+
+                    self.uuid = dpg.add_text(
                         default_value="UUID: ", label=self.parsed["id"], show_label=True
                     )
                     self.run_indicator = dpg.add_text(
@@ -74,20 +117,42 @@ class Server:
                         label=self.parsed["running"],
                         show_label=True,
                     )
-                    self.logs_term = dpg.add_listbox(
-                        self.logs, width=-1, num_items=len(self.logs) / 2 + 25
-                    )
-                    dpg.add_input_text(
+                    with dpg.child_window(
+                        label="Terminalwin",
+                        horizontal_scrollbar=True,
+                        border=False,
+                        autosize_x=True,
+                        autosize_y=True,
+                    ):
+
+                        self.logs_term = dpg.add_listbox(
+                            self.logs,
+                            width=-1,
+                            num_items=25,
+                            tracked=True,
+                        )
+                    self.command_input = dpg.add_input_text(
                         label="command",
                         width=-1,
                         callback=self.command_callback,
                         on_enter=True,
                     )
                     self.window_pos = dpg.get_item_pos(self.parsed["id"])
-                    with self.button_group:
+                    self.button_group = None
+                    with dpg.group(
+                        horizontal=True,
+                        tag=f"group_{self.parsed['id']}",
+                    ):
                         dpg.add_button(label="start", callback=self.start)
                         dpg.add_button(label="stop", callback=self.stop)
+
                 with dpg.tab(label="Graphs"):
+                    self.plot_group = dpg.group(
+                        horizontal=True,
+                        tag=f"plot_{self.parsed['id']}",
+                        width=-1,
+                        height=-1,
+                    )
                     with self.plot_group:
                         self.cpu_plot = dpg.plot(label="CPU Usage", width=-1)
                         self.ram_plot = dpg.plot(label="RAM Usage", width=-1)
@@ -140,62 +205,69 @@ class Server:
     def resize_callback(self):
         self.viewport_width = dpg.get_viewport_client_width()
         self.viewport_height = dpg.get_viewport_client_height()
-        self.window_width = round(self.viewport_width * 3 / 4)
+        self.window_width = dpg.get_item_width(self.parsed["id"])
 
         dpg.configure_item(
             self.parsed["id"],
-            width=self.window_width,
+            width=round(self.viewport_width * 3 / 4),
             height=self.viewport_height,
             pos=(
                 round(self.window_pos[0] + self.viewport_width / 4),
                 self.window_pos[1],
             ),
         )
+
         self.group_pos = dpg.get_item_pos(f"group_{self.parsed['id']}")
         self.group_width = dpg.get_item_width(f"group_{self.parsed['id']}")
-        print((self.window_width / 2) + self.group_width / 2)
+        """
         dpg.configure_item(
             f"group_{self.parsed['id']}",
             pos=(
-                round((self.window_width / 2) + self.group_width / 2),
-                self.group_pos[1],
+                round((self.window_width / 2) + self.group_width),
+                self.viewport_height - 100,
             ),
-        )
+        )"""
 
     def update_data(self):
         try:
             self.stats = crafty.get_server_stats(self.parsed["id"])
             self.logs = crafty.get_server_logs(self.parsed["id"])
-        except:
-            pass
-        self.parsed = {
-            "id": self.stats["server_id"]["server_id"],
-            "name": self.stats["server_id"]["server_name"],
-            "created_time": self.stats["created"],
-            "running": self.stats["running"],
-            "crashed": self.stats["crashed"],
-            "size": self.stats["world_size"],
-            "mem": self.stats["mem"],
-            "cpu": self.stats["cpu"],
-        }
-        self.cpu_plot_x.append(self.cpu_plot_x[-1] + 0.5)
-        self.cpu_plot_y.append(self.stats["cpu"] / 10)
-        self.ram_plot_x.append(self.ram_plot_x[-1] + 0.5)
+            self.parsed = {
+                "id": self.stats["server_id"]["server_id"],
+                "name": self.stats["server_id"]["server_name"],
+                "created_time": self.stats["created"],
+                "running": self.stats["running"],
+                "crashed": self.stats["crashed"],
+                "size": self.stats["world_size"],
+                "mem": self.stats["mem"],
+                "cpu": self.stats["cpu"],
+            }
+            self.cpu_plot_x.append(self.cpu_plot_x[-1] + 0.5)
+            self.cpu_plot_y.append(self.stats["cpu"] / 10)
+            self.ram_plot_x.append(self.ram_plot_x[-1] + 0.5)
 
-        if type(self.stats["mem"]) == str:
-            self.ram_plot_y.append(float(self.stats["mem"].strip("GB")))
-        else:
-            self.ram_plot_y.append(self.stats["mem"])
+            if type(self.parsed["mem"]) == str:
+                if self.parsed["mem"].endswith("GB"):
+                    self.ram_plot_y.append(int(self.stats["mem"].strip("GB")))
+                elif self.parsed["mem"].endswith("M"):
+                    self.ram_plot_y.append(int(self.stats["mem"].strip("M")) / 1024)
 
-        dpg.configure_item(
-            f"cpu_line_{self.parsed['id']}", x=self.cpu_plot_x, y=self.cpu_plot_y
-        )
-        dpg.configure_item(
-            f"ram_line_{self.parsed['id']}", x=self.ram_plot_x, y=self.ram_plot_y
-        )
-        dpg.set_item_label(self.run_indicator, self.parsed["running"])
-        dpg.configure_item(self.logs_term, items=self.logs)
-        self.resize_callback()
+            for log in self.logs:
+                self.log_length.append(dpg.get_text_size(log)[0])
+            print(max(self.log_length))
+
+            dpg.configure_item(
+                f"cpu_line_{self.parsed['id']}", x=self.cpu_plot_x, y=self.cpu_plot_y
+            )
+            dpg.configure_item(
+                f"ram_line_{self.parsed['id']}", x=self.ram_plot_x, y=self.ram_plot_y
+            )
+            dpg.set_item_label(self.run_indicator, self.parsed["running"])
+            dpg.configure_item(self.logs_term, items=self.logs)
+            self.resize_callback()
+
+        except Exception as e:
+            self.logger.exception("Failled to retrive server statistics")
 
 
 class Main_Window:
@@ -252,15 +324,22 @@ class Main_Window:
         self.server_window[self.selected_server].resize_callback()
 
 
-win = Main_Window(crafty)
-win.setup_window()
-dpg.set_viewport_resize_callback(win.resize_callback)
-update_timer = scheduler.RepeatedTimer(1, win.update_server_data)
+try:
+    win = Main_Window(crafty)
+    win.setup_window()
+    dpg.set_viewport_resize_callback(win.resize_callback)
+    schd = scheduler.RepeatedTimer(0.05, win.update_server_data)
+    schd.start()
+    dpg.show_item_registry()
+    dpg.show_metrics()
+except Exception as e:
+    logger.exception("Failed to start")
+    raise SystemExit
 
 
 def exit_callback():
-    update_timer.stop()
-    update_timer._timer.cancel()
+    logger.info("Shutting down")
+    schd.stop()
     dpg.stop_dearpygui()
     raise SystemExit
 
@@ -268,6 +347,4 @@ def exit_callback():
 dpg.set_exit_callback(exit_callback)
 dpg.show_viewport()
 dpg.start_dearpygui()
-
-update_timer.stop()
-update_timer._timer.cancel()
+exit_callback()

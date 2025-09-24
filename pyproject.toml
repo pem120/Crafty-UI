@@ -7,5 +7,6 @@ requires-python = ">=3.11"
 dependencies = [
     "crafty-client>=2.0.0",
     "dearpygui>=2.0.0",
+    "dearpygui-grid>=1.0.1",
     "toml>=0.10.2",
 ]
