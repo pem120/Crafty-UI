@@ -1,8 +1,10 @@
+from re import T
 import dearpygui.dearpygui as dpg
 import crafty_client
 import colorlog
 from logging_config import logger, handler
-import websocket
+import crafttyWSAPI
+import threading
 
 
 class Server:
@@ -49,6 +51,9 @@ class Server:
         self.logger = colorlog.getLogger(self.parsed["name"])
         self.logger.addHandler(handler)
         self.logger.setLevel(colorlog.DEBUG)
+        self.WSAPI = crafttyWSAPI.CraftyWSAPI(crafty, self.serverUuid)
+        self.WSThread = threading.Thread(target=self.WSAPI.run,daemon=True)
+        self.WSThread.start()
 
     def Start(self):
         try:
@@ -236,7 +241,6 @@ class Server:
                 for log in self.logs:
                     if isinstance(log, str):
                         self.logLength.append(dpg.get_text_size(log)[0])
-                print(self.logs)
 
                 dpg.configure_item(
                     f"cpu_line_{self.parsed['id']}",

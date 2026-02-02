@@ -22,3 +22,7 @@ logger.addHandler(handler)
 urllib_logger = colorlog.getLogger("Main.urllib3")
 urllib_logger.setLevel(colorlog.WARNING)
 urllib_logger.addHandler(handler)
+
+craftyWSAPI_logger = colorlog.getLogger("Main.WSAPI")
+craftyWSAPI_logger.setLevel(colorlog.DEBUG)
+craftyWSAPI_logger.addHandler(handler)

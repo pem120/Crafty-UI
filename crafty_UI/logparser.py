@@ -61,7 +61,7 @@ def show_logs_in_dpg(formatted_logs):
                         entry["location"], color=[150, 255, 150]
                     )  # Light Green
 
-                    # Logic for Type Coloring
+                    # Logic for Type Coloringhttps://xiaomitools.com/mi-unlock-tool/
                     log_type = entry["type"]
                     type_color = [255, 255, 255]  # Default White
                     if log_type == "WARN":
