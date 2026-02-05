@@ -2,8 +2,8 @@ import threading
 import os
 import time
 import dearpygui.dearpygui as dpg
-from logging_config import logger
-from server import Server
+from crafty_UI.logging_config import logger
+from crafty_UI.server import Server
 
 
 class MainWindow:

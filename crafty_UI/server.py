@@ -1,10 +1,11 @@
-from re import T
 import dearpygui.dearpygui as dpg
 import crafty_client
 import colorlog
-from logging_config import logger, handler
-import crafttyWSAPI
+from crafty_UI.logging_config import logger, handler
+from crafty_UI import crafttyWSAPI
 import threading
+import html
+from crafty_UI.logparser import parse_logs
 
 
 class Server:
@@ -14,10 +15,9 @@ class Server:
 
         self.crafty = crafty
         self.logLength: list[float] = []
-        self.stats = None
+        self.stats = list[str]
         self.logs: list[str] = []
         self.serverUuid = serverUuid
-        print(serverUuid)
 
         try:
             self.stats = self.crafty.get_server_stats(serverUuid)
@@ -48,11 +48,15 @@ class Server:
                 "mem": -1,
                 "cpu": -1,
             }
+        if self.logs:
+            for l in range(len(self.logs)):
+                self.logs[l] = html.unescape(self.logs[l])
+
         self.logger = colorlog.getLogger(self.parsed["name"])
         self.logger.addHandler(handler)
         self.logger.setLevel(colorlog.DEBUG)
         self.WSAPI = crafttyWSAPI.CraftyWSAPI(crafty, self.serverUuid)
-        self.WSThread = threading.Thread(target=self.WSAPI.run,daemon=True)
+        self.WSThread = threading.Thread(target=self.WSAPI.run, daemon=True)
         self.WSThread.start()
 
     def Start(self):
@@ -99,35 +103,69 @@ class Server:
                         label=self.parsed["running"],
                         show_label=True,
                     )
-                    with dpg.child_window(
-                        label="Terminalwin",
-                        horizontal_scrollbar=True,
-                        border=False,
-                        # autosize_x=True,
-                        # autosize_y=False,
-                        height=-1,
-                    ):
-                        self.logsTerm = dpg.add_listbox(
-                            self.logs,
-                            width=-1,
-                            num_items=25,
-                            tracked=True,
-                        )
-                        self.commandInput = dpg.add_input_text(
-                            label="command",
-                            width=-1,
-                            callback=self.CommandCallback,
-                            on_enter=True,
-                        )
-                        self.windowPos = dpg.get_item_pos(self.parsed["id"])
-                        self.buttonGroup = None
-                        with dpg.group(
-                            horizontal=True,
-                            tag=f"group_{self.parsed['id']}",
-                        ):
-                            dpg.add_button(label="start", callback=self.Start)
-                            dpg.add_button(label="stop", callback=self.Stop)
+                    # logs child window (contains a table for parsed logs)
+                    logs_child_tag = f"logs_child_{self.parsed['id']}"
+                    logs_table_tag = f"logs_table_{self.parsed['id']}"
 
+                    # create a table for structured logs
+                    with dpg.table(
+                        header_row=True,
+                        resizable=True,
+                        policy=dpg.mvTable_SizingFixedFit,
+                        row_background=True,
+                        borders_innerV=True,
+                        borders_outerV=True,
+                        borders_outerH=True,
+                        tag=logs_table_tag,
+                    ):
+                        dpg.add_table_column(label="Time")
+                        dpg.add_table_column(label="Location")
+                        dpg.add_table_column(label="Type")
+                        dpg.add_table_column(label="Root")
+                        dpg.add_table_column(label="Message")
+                    # ensure table is visible / sized
+                    try:
+                        dpg.configure_item(
+                            logs_table_tag, width=-1, show=True  # height=-1,
+                        )
+                    except Exception:
+                        pass
+                    # populate initial table rows (limit to last 25 entries)
+                    parsed = parse_logs(self.logs[-25:])
+                    for entry in parsed:
+                        with dpg.table_row(parent=logs_table_tag):
+                            dpg.add_text(entry.get("time", ""), color=[200, 200, 200])
+                            dpg.add_text(
+                                entry.get("location", ""), color=[150, 255, 150]
+                            )
+                            log_type = entry.get("type", "")
+                            type_color = [255, 255, 255]
+                            if log_type == "WARN":
+                                type_color = [255, 200, 0]
+                            elif log_type == "ERROR":
+                                type_color = [255, 50, 50]
+                            elif log_type == "INFO":
+                                type_color = [100, 200, 255]
+                            dpg.add_text(log_type, color=type_color)
+                            dpg.add_text(entry.get("root", ""), color=[180, 180, 180])
+                            dpg.add_text(entry.get("message", ""))
+                    with dpg.group(
+                        horizontal=True,
+                        tag=f"group_{self.parsed['id']}",
+                    ):
+                        dpg.add_button(label="start", callback=self.Start)
+                        dpg.add_button(label="stop", callback=self.Stop)
+                    self.commandInput = dpg.add_input_text(
+                        label="command",
+                        width=-1,
+                        callback=self.CommandCallback,
+                        on_enter=True,
+                    )
+
+                    self.logsTerm = logs_child_tag
+                    self.logsTable = logs_table_tag
+
+                    self.windowPos = dpg.get_item_pos(self.parsed["id"])
                 with dpg.tab(label="Graphs"):
                     self.plotGroup = dpg.group(
                         horizontal=True,
@@ -199,15 +237,16 @@ class Server:
             ),
         )
 
-        self.groupPos = dpg.get_item_pos(f"group_{self.parsed['id']}")
-        self.groupWidth = dpg.get_item_width(f"group_{self.parsed['id']}")
+        # self.groupPos = dpg.get_item_pos(f"group_{self.parsed['id']}")
+        # self.groupWidth = dpg.get_item_width(f"group_{self.parsed['id']}")
 
     def UpdateData(self):
         try:
+            newLogs = []
             newStats = self.crafty.get_server_stats(self.parsed["id"])
-            newLogs = self.crafty.get_server_logs(self.parsed["id"]) or []
+            newLogs = self.logs + self.WSAPI.get_logs()
 
-            if newStats:
+            if newStats or newLogs:
                 self.stats = newStats
                 self.logs = newLogs
                 self.parsed = {
@@ -253,7 +292,51 @@ class Server:
                     y=self.ramPlotY,
                 )
                 dpg.set_item_label(self.runIndicator, str(self.parsed["running"]))
-                dpg.configure_item(self.logsTerm, items=self.logs)
+
+                parsed = parse_logs(self.logs[-25:])
+                try:
+                    rows = dpg.get_item_children(self.logsTable, slot=1)
+                    for row in rows:
+                        dpg.delete_item(row)
+                except:
+                    pass
+                if parsed:
+                    for entry in parsed:
+                        with dpg.table_row(parent=self.logsTable):
+                            dpg.add_text(entry.get("time", ""), color=[200, 200, 200])
+                            dpg.add_text(
+                                entry.get("location", ""), color=[150, 255, 150]
+                            )
+                            log_type = entry.get("type", "")
+                            type_color = [255, 255, 255]
+                            if log_type == "WARN":
+                                type_color = [255, 200, 0]
+                            elif log_type == "ERROR":
+                                type_color = [255, 50, 50]
+                            elif log_type == "INFO":
+                                type_color = [100, 200, 255]
+                            dpg.add_text(log_type, color=type_color)
+                            dpg.add_text(entry.get("root", ""), color=[180, 180, 180])
+                            dpg.add_text(entry.get("message", ""))
+                else:
+                    """# fallback to raw text entries inside the child if parsing produced nothing
+                    dpg.delete_item(self.logsTerm, children_only=True)
+                    for log in self.logs[-25:]:
+                        dpg.add_text(log, parent=self.logsTerm)
+                        # scroll the logs child to bottom
+                        dpg.set_y_scroll(self.logsTerm, -1)
+                        # update debug counter and remember the count we last rendered
+                        try:
+                            dpg.set_value(self.logsCountText, f"Logs: {len(self.logs)}")
+                        except Exception:
+                            pass
+                        # remember the count we last rendered
+                        try:
+                            self._last_logs_count = len(self.logs)
+                        except Exception:
+                            pass"""
+                    pass
+
                 self.ResizeCallback()
 
         except Exception:

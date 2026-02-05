@@ -1,10 +1,11 @@
 import json
 import urllib.parse
 from crafty_client import crafty4
-from logging_config import craftyWSAPI_logger
+from .logging_config import craftyWSAPI_logger
 import websocket
 import html
 import ssl
+import re
 
 
 class CraftyWSAPI:
@@ -23,16 +24,20 @@ class CraftyWSAPI:
         self.ssl_ctx = ssl.create_default_context()
         self.ssl_ctx.check_hostname = False
         self.ssl_ctx.verify_mode = ssl.CERT_NONE
+        self.logs = []
+        self.reexp = re.compile("<([^>]+)>")
 
     def on_message(self, ws, message):
         self.logger.debug(message)
         parsed = json.loads(str(message))
-        data = json.loads(parsed["data"])
+        data = parsed["data"]
         match parsed["event"]:
             case "update_server_details":
                 self.stats = data
             case "vterm_new_line":
-                self.log = html.unescape(data)
+                self.logs.append(re.sub(self.reexp, "", html.unescape(data["line"])))
+            case "notification":
+                self.notification = data
             case _:
                 self.logger.error(
                     f"Unknown messgae type '{parsed["event"]}'.Not parsing"
@@ -56,3 +61,6 @@ class CraftyWSAPI:
             ping_interval=30,
             ping_timeout=10,
         )
+
+    def get_logs(self):
+        return self.logs

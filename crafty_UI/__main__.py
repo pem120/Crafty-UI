@@ -3,10 +3,10 @@ import crafty_client
 import toml
 import urllib3
 import colorlog
-from logging_config import logger
 
-from server import Server
-from main_window import MainWindow
+from crafty_UI.logging_config import logger
+from crafty_UI.server import Server
+from crafty_UI.main_window import MainWindow
 
 # Disable urllib3 warnings
 urllib3.disable_warnings()
@@ -37,7 +37,7 @@ def ExitCallback():
     raise SystemExit
 
 
-if __name__ == "__main__":
+def Run():
     try:
         dpg.create_context()
         dpg.create_viewport(title="Crafty UI")
@@ -50,9 +50,14 @@ if __name__ == "__main__":
         dpg.set_exit_callback(ExitCallback)
         dpg.show_viewport()
         dpg.show_item_registry()
+        dpg.show_debug()
         dpg.start_dearpygui()
 
         ExitCallback()
     except Exception as e:
         logger.exception("Failed to start")
         exit(-1)
+
+
+if __name__ == "__main__":
+    Run()
