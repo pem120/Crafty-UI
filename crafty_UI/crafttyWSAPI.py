@@ -26,6 +26,7 @@ class CraftyWSAPI:
         self.ssl_ctx.verify_mode = ssl.CERT_NONE
         self.logs = []
         self.reexp = re.compile("<([^>]+)>")
+        self.stats = None
 
     def on_message(self, ws, message):
         self.logger.debug(message)
@@ -39,7 +40,7 @@ class CraftyWSAPI:
             case "notification":
                 self.notification = data
             case _:
-                self.logger.error(
+                self.logger.warn(
                     f"Unknown messgae type '{parsed["event"]}'.Not parsing"
                 )
 
@@ -64,3 +65,6 @@ class CraftyWSAPI:
 
     def get_logs(self):
         return self.logs
+
+    def get_stats(self):
+        return self.stats

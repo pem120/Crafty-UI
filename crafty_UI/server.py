@@ -10,6 +10,7 @@ from crafty_UI.logparser import parse_logs
 
 class Server:
     def __init__(self, crafty: crafty_client.Crafty4, serverUuid: str):
+
         if crafty is None:
             raise ValueError("Crafty client instance cannot be None")
 
@@ -18,6 +19,11 @@ class Server:
         self.stats = list[str]
         self.logs: list[str] = []
         self.serverUuid = serverUuid
+        # Initialize plot data lists
+        self.cpuPlotX = [0.0]
+        self.cpuPlotY = [0.0]
+        self.ramPlotX = [0.0]
+        self.ramPlotY = [0.0]
 
         try:
             self.stats = self.crafty.get_server_stats(serverUuid)
@@ -243,22 +249,26 @@ class Server:
     def UpdateData(self):
         try:
             newLogs = []
-            newStats = self.crafty.get_server_stats(self.parsed["id"])
+            newStats = self.WSAPI.get_stats()
             newLogs = self.logs + self.WSAPI.get_logs()
 
             if newStats or newLogs:
                 self.stats = newStats
                 self.logs = newLogs
-                self.parsed = {
-                    "id": self.stats["server_id"]["server_id"],
-                    "name": self.stats["server_id"]["server_name"],
-                    "created_time": self.stats["created"],
-                    "running": self.stats["running"],
-                    "crashed": self.stats["crashed"],
-                    "size": self.stats["world_size"],
-                    "mem": self.stats["mem"],
-                    "cpu": self.stats["cpu"],
-                }
+                try:
+                    self.parsed = {
+                        "id": self.stats["id"],
+                        "name": self.parsed["name"],
+                        "created_time": self.parsed["created_time"],
+                        "running": self.stats["running"],
+                        "crashed": self.stats["crashed"],
+                        "size": self.stats["world_size"],
+                        "mem": self.stats["mem"],
+                        "cpu": self.stats["cpu"],
+                    }
+                except:
+                    self.logger.exception("Faied to update Stats")
+                print(self.parsed["cpu"])
 
                 self.cpuPlotX.append(self.cpuPlotX[-1] + 1 / 0.3)
                 self.cpuPlotY.append(float(self.stats["cpu"]) / 10)
