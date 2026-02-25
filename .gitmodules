@@ -1,0 +1,4 @@
+[submodule "crafty-client"]
+	path = crafty-client
+	url = git@gitlab.com:pem120/crafty-client.git
+	branch = dev
